@@ -1,6 +1,6 @@
 {
   "name": "gpio-pcal64",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Driver for the NXP PCAL64 I/O expander family",
   "keywords": [],
   "author": "Marcus Chang",
@@ -18,6 +18,6 @@
   "dependencies": {
     "gpio-efm32": "ARMmbed/gpio-efm32#~0.1.11",
     "emlib": "ARMmbed/emlib#~3.20.9"
-    },
+  },
   "targetDependencies": {}
 }
