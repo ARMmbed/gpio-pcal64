@@ -16,7 +16,9 @@
     }
   ],
   "dependencies": {
+    "yottos": "ARMmbed/yottos#~0.0.31",
     "gpio-efm32": "ARMmbed/gpio-efm32#~0.1.11",
+    "yterror": "ARMmbed/yterror#~0.0.2",
     "emlib": "ARMmbed/emlib#~3.20.9"
   },
   "targetDependencies": {}
