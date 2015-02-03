@@ -15,6 +15,9 @@ static uint8_t rxBuffer[2] = {0};
 
 yt_callback_t handleInterrupt;
 
+yt_callback_t callbacks[16] = {0};
+enum PinTransition transitions[16] = {0};
+
 #define PCAL64_ADDRESS 0x40
 
 enum {
@@ -67,9 +70,6 @@ void PCAL64Init(PinNameIntType interruptPin)
 
 
     /***************************************************************************/
-    // debug
-    GPIO_PinModeSet(gpioPortA, 2, gpioModeWiredAndPullUp, 1);
-
     /***************************************************************************/
     /***************************************************************************/
     // Using default settings
@@ -94,62 +94,252 @@ void PCAL64Init(PinNameIntType interruptPin)
     /* Listen for interrupts */
     [GPIOControl requireActiveThenCall:^{
         pinSetMode(interruptPin, Pin_Input_Pull, Pin_On);
-        pinSetCallback(interruptPin, Pin_Falling_Edge, handleInterrupt);          
+        pinSetCallback(interruptPin, Pin_Any_Edge, handleInterrupt);          
     }];
 
 }
 
 yt_callback_t handleInterrupt =
-^{
-    uint16_t value;
+^{  
+    /*  Read interrupt flags and the current pin value
+    */
+    uint16_t flags = 0;
+    uint16_t values = 0;
 
-    readRegister(INTERRUPT_STATUS_0, &value, 2);
+    readRegister(INPUT_PORT_0, &values, 2);
+    readRegister(INTERRUPT_STATUS_0, &flags, 2);
+
+    // step through each pin
+    for (uint8_t pin = 0; pin < 16; pin++)
+    {
+        uint16_t pinBit = 1 << pin;
+
+        // check against interrupt flags
+        if (flags & pinBit)
+        {
+            enum PinTransition transition = transitions[pin];
+            bool pinSet = (values & pinBit);
+
+            // if the transition matches, post callback task
+            if ((transition == Pin_Any_Edge) ||
+               ((transition == Pin_Rising_Edge) && pinSet) ||
+               ((transition == Pin_Falling_Edge) && !pinSet))
+            {
+                ytPost(callbacks[pin], ytMilliseconds(0));
+            }
+        }
+    }
+
+    GPIO_PinOutToggle(gpioPortA, 2);
 };
 
-
-void PCAL64PinSetMode(enum PCAL64PinName pin, enum PinMode mode, enum PinOutput value)
+/*
+    Get / Set all pins at once
+*/
+void PCAL64SetMode(uint16_t modes, uint16_t values)
 {
-    writeRegister(OUTPUT_DRIVE_STRENGTH_0_LOW, 0x40, 1);    
-    writeRegister(CONFIGURATION_PORT_0, 0x08, 1);    
+    writeRegister(OUTPUT_PORT_0, values, 2);
+    writeRegister(CONFIGURATION_PORT_0, modes, 2);    
 }
 
-void PCAL64PinSetOutput(enum PCAL64PinName pin, enum PinOutput value)
+void PCAL64SetOutput(uint16_t values)
 {
-    uint16_t portCache;
+    writeRegister(OUTPUT_PORT_0, values, 2);
+}
 
-    if (value == Pin_High)
+uint16_t PCAL64GetValue()
+{
+    uint16_t values;
+
+    readRegister(INPUT_PORT_0, &values, 2);
+
+    return values;
+}
+
+void PCAL64SetStrength(uint32_t values)
+{    
+    writeRegister(OUTPUT_DRIVE_STRENGTH_0_LOW, values, 2);
+    writeRegister(OUTPUT_DRIVE_STRENGTH_1_LOW, (values >> 16), 2);
+}
+
+/* 
+    get/set individual pins
+*/
+YTError PCAL64PinSetMode(enum PCAL64PinName pinName, enum PCAL64PinMode mode, enum PinOutput value)
+{
+    if (pinName < Pin_End)
     {
-        portCache |= (1 << pin);
+        uint16_t pinBit = 1 << pinName;
+
+        /*  Set pin value
+        */
+        uint16_t values = 0;
+        readRegister(OUTPUT_PORT_0, &values, 2);
+
+        // only write register if value has changed
+        if ((value == Pin_High) && !(values & pinBit))
+        {
+            values |= pinBit;
+            writeRegister(OUTPUT_PORT_0, values, 2);
+        }
+        else if ((value == Pin_Low) && (values & pinBit))
+        {
+            values &= ~pinBit;
+            writeRegister(OUTPUT_PORT_0, values, 2);
+        }
+
+        /*  Set pin direction
+        */
+        uint16_t modes = 0;
+        readRegister(CONFIGURATION_PORT_0, &modes, 2);
+
+        // only write register if direction has changed
+        if ((mode == Mode_Pin_Input) && !(modes & pinBit))
+        {
+            modes |= pinBit;
+            writeRegister(CONFIGURATION_PORT_0, modes, 2);    
+        }
+        else if ((mode == Mode_Pin_Output) && (modes & pinBit))
+        {
+            modes &= ~pinBit;
+            writeRegister(CONFIGURATION_PORT_0, modes, 2);    
+        }
+
+        return ytError(YTNoError);
     }
     else
     {
-        portCache &= ~(1 << pin);
+        return ytError(YTBadRequest);        
     }
-
-    writeRegister(OUTPUT_PORT_0, portCache, 2);
 }
 
-enum PinOutput PCAL64PinGetValue(enum PCAL64PinName pin)
+YTError PCAL64PinSetOutput(enum PCAL64PinName pinName, enum PinOutput value)
 {
-    uint16_t value;
-
-    readRegister(INPUT_PORT_0, &value, 2);
-
-    if (value & (1 << pin))
+    if (pinName < Pin_End)
     {
-        return Pin_High;
+        uint16_t pinBit = 1 << pinName;
+
+        /*  Set pin output value
+        */
+        uint16_t values = 0;
+        readRegister(OUTPUT_PORT_0, &values, 2);
+
+        // only write register if output has changed
+        if ((value == Pin_High) && !(values & pinBit))
+        {
+            values |= pinBit;
+            writeRegister(CONFIGURATION_PORT_0, values, 2);    
+        }
+        else if ((value == Pin_Low) && (values & pinBit))
+        {
+            values &= ~pinBit;
+            writeRegister(CONFIGURATION_PORT_0, values, 2);    
+        }
+
+        return ytError(YTNoError);
     }
     else
     {
-        return Pin_Low;
+        return ytError(YTBadRequest);        
     }
 }
 
-YTError PCAL64PinSetCallback(enum PCAL64PinName pin, enum PinTransition transition, yt_callback_t callback)
+YTError PCAL64PinToggle(enum PCAL64PinName pinName)
 {
-    ;
+    if (pinName < Pin_End)
+    {
+        uint16_t pinBit = 1 << pinName;
+        uint16_t values = 0;
+
+        readRegister(OUTPUT_PORT_0, &values, 2);
+        values = (values & ~pinBit) | ((values ^ pinBit) & pinBit);
+        writeRegister(OUTPUT_PORT_0, values, 2);
+
+        return ytError(YTNoError);
+    }
+    else
+    {
+        return ytError(YTBadRequest);        
+    }
 }
 
+enum PinOutput PCAL64PinGetValue(enum PCAL64PinName pinName)
+{
+    uint16_t pinBit = 1 << pinName;
+    uint16_t values;
+
+    readRegister(INPUT_PORT_0, &values, 2);
+
+    return (values & pinBit);
+}
+
+
+/*
+    Setup interrupt handling
+*/
+
+YTError PCAL64PinSetCallback(enum PCAL64PinName pinName, enum PinTransition transition, yt_callback_t callback)
+{
+    if ((pinName < Pin_End) && (callback))
+    {
+        callbacks[pinName] = callback;
+        transitions[pinName] = transition;
+
+        uint16_t pinBit = 1 << pinName;
+        uint16_t interruptMask = 0;
+        uint16_t direction = 0;
+
+        readRegister(CONFIGURATION_PORT_0, &direction, 2);
+        // only write register if direction is not already set to out
+        if (!(direction & pinBit))
+        {
+            direction |= pinBit;
+            writeRegister(CONFIGURATION_PORT_0, direction, 2);
+        }
+
+        readRegister(INTERRUPT_MASK_0, &interruptMask, 2);
+        // only clear interrupt mask if not already cleared
+        if (interruptMask & pinBit)
+        {
+            interruptMask &= ~pinBit;
+            writeRegister(INTERRUPT_MASK_0, interruptMask, 2);            
+        }
+
+        return ytError(YTNoError);
+    }
+    else
+    {
+        return ytError(YTBadRequest);        
+    }
+}
+
+YTError PCAL64PinRemoveCallback(enum PCAL64PinName pinName)
+{
+    if (pinName < Pin_End)
+    {
+        uint16_t pinBit = 1 << pinName;
+        uint16_t interruptMask = 0;
+
+        readRegister(INTERRUPT_MASK_0, &interruptMask, 2);
+
+        // only set interrupt mask if not already set
+        if (!(interruptMask & pinBit))
+        {
+            interruptMask |= pinBit;
+            writeRegister(INTERRUPT_MASK_0, interruptMask, 2);            
+        }
+
+        return ytError(YTNoError);
+    }
+    else
+    {
+        return ytError(YTBadRequest);        
+    }
+}
+
+/* 
+    Read / Write register over I2C
+*/
 static YTError readRegister(uint8_t address, uint16_t* value, uint8_t rxLength)
 {
     if (rxLength < 3)
@@ -216,7 +406,7 @@ static YTError writeRegister(uint8_t address, uint16_t value, uint8_t txLength)
 
 void I2C0_IRQHandler()
 {
-    GPIO_PinOutToggle(gpioPortA, 1);
+//    GPIO_PinOutToggle(gpioPortA, 1);
 }
 
 void I2C1_IRQHandler()
