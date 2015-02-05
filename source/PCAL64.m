@@ -228,12 +228,12 @@ YTError PCAL64PinSetOutput(enum PCAL64PinName pinName, enum PinOutput value)
         if ((value == Pin_High) && !(values & pinBit))
         {
             values |= pinBit;
-            writeRegister(CONFIGURATION_PORT_0, values, 2);    
+            writeRegister(OUTPUT_PORT_0, values, 2);    
         }
         else if ((value == Pin_Low) && (values & pinBit))
         {
             values &= ~pinBit;
-            writeRegister(CONFIGURATION_PORT_0, values, 2);    
+            writeRegister(OUTPUT_PORT_0, values, 2);    
         }
 
         return ytError(YTNoError);
