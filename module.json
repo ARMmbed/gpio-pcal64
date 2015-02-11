@@ -1,6 +1,6 @@
 {
   "name": "gpio-pcal64",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Driver for the NXP PCAL64 I/O expander family",
   "keywords": [],
   "author": "Marcus Chang",
