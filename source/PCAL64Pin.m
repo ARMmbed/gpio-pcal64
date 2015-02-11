@@ -469,6 +469,7 @@ void I2C1_IRQHandler()
 
 - (YTError) setValue:(uint8_t) value
 {
+    output = (value) ? 1 : 0;
     return PCAL64PinSetOutput(pin, value);
 }
 
