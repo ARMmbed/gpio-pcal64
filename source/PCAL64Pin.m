@@ -1,4 +1,4 @@
-#import "gpio-pcal64/PCAL64.h"
+#import "gpio-pcal64/PCAL64Pin.h"
 
 #import "emlib/em_i2c.h"
 #import "emlib/em_cmu.h"
@@ -16,7 +16,7 @@ static uint8_t rxBuffer[2] = {0};
 yt_callback_t handleInterrupt;
 
 yt_callback_t callbacks[16] = {0};
-enum PinTransition transitions[16] = {0};
+enum GPIOEdge transitions[16] = {0};
 
 #define PCAL64_ADDRESS 0x40
 
@@ -50,53 +50,59 @@ enum {
 
 void PCAL64Init(PinNameIntType interruptPin)
 {
-    /***************************************************************************/
-    /***************************************************************************/
-    /***************************************************************************/
-    /* Enabling clock to the I2C, GPIO, LE */
-    CMU_ClockEnable(cmuClock_I2C0, true);  
-    CMU_ClockEnable(cmuClock_GPIO, true);
-    CMU_ClockEnable(cmuClock_CORELE, true);
-    
-    // Enabling USART0 (see errata)
-    CMU_ClockEnable(cmuClock_USART0, true);
-    
-    /* Starting LFXO and waiting until it is stable */
-    CMU_OscillatorEnable(cmuOsc_LFXO, true, true);
+    static bool runOnce = true;
 
-    /* Routing the LFXO clock to the RTC */
-    CMU_ClockSelectSet(cmuClock_LFA,cmuSelect_LFXO);
-    CMU_ClockEnable(cmuClock_RTC, true);
+    if (runOnce)
+    {
+        runOnce = false;
+
+        /***************************************************************************/
+        /***************************************************************************/
+        /***************************************************************************/
+        /* Enabling clock to the I2C, GPIO, LE */
+        CMU_ClockEnable(cmuClock_I2C0, true);  
+        CMU_ClockEnable(cmuClock_GPIO, true);
+        CMU_ClockEnable(cmuClock_CORELE, true);
+        
+        // Enabling USART0 (see errata)
+        CMU_ClockEnable(cmuClock_USART0, true);
+        
+        /* Starting LFXO and waiting until it is stable */
+        CMU_OscillatorEnable(cmuOsc_LFXO, true, true);
+
+        /* Routing the LFXO clock to the RTC */
+        CMU_ClockSelectSet(cmuClock_LFA,cmuSelect_LFXO);
+        CMU_ClockEnable(cmuClock_RTC, true);
 
 
-    /***************************************************************************/
-    /***************************************************************************/
-    /***************************************************************************/
-    // Using default settings
-    I2C_Init_TypeDef i2cInit = I2C_INIT_DEFAULT;
+        /***************************************************************************/
+        /***************************************************************************/
+        /***************************************************************************/
+        // Using default settings
+        I2C_Init_TypeDef i2cInit = I2C_INIT_DEFAULT;
 
-    /* Using PC0 (SDA) and PC1 (SCL) */
-    GPIO_PinModeSet(gpioPortC, 0, gpioModeWiredAndPullUpFilter, 1);
-    GPIO_PinModeSet(gpioPortC, 1, gpioModeWiredAndPullUpFilter, 1);
-    
-    /* Enable pins at location 4 */
-    I2C0->ROUTE = I2C_ROUTE_SDAPEN |
-                  I2C_ROUTE_SCLPEN |
-                  (0x04 << _I2C_ROUTE_LOCATION_SHIFT);
+        /* Using PC0 (SDA) and PC1 (SCL) */
+        GPIO_PinModeSet(gpioPortC, 0, gpioModeWiredAndPullUpFilter, 1);
+        GPIO_PinModeSet(gpioPortC, 1, gpioModeWiredAndPullUpFilter, 1);
+        
+        /* Enable pins at location 4 */
+        I2C0->ROUTE = I2C_ROUTE_SDAPEN |
+                      I2C_ROUTE_SCLPEN |
+                      (0x04 << _I2C_ROUTE_LOCATION_SHIFT);
 
-    /* Initializing the I2C */
-    i2cTransfer.addr = PCAL64_ADDRESS;
-    i2cTransfer.buf[0].data = txBuffer;
-    i2cTransfer.buf[1].data = rxBuffer;
+        /* Initializing the I2C */
+        i2cTransfer.addr = PCAL64_ADDRESS;
+        i2cTransfer.buf[0].data = txBuffer;
+        i2cTransfer.buf[1].data = rxBuffer;
 
-    I2C_Init(I2C0, &i2cInit);
+        I2C_Init(I2C0, &i2cInit);
 
-    /* Listen for interrupts */
-    [GPIOControl requireActiveThenCall:^{
-        pinSetMode(interruptPin, Pin_Input_Pull, Pin_On);
-        pinSetCallback(interruptPin, Pin_Any_Edge, handleInterrupt);          
-    }];
-
+        /* Listen for interrupts */
+        [GPIOControl requireActiveThenCall:^{
+            pinSetMode(interruptPin, Pin_Input_Pull, Pin_On);
+            pinSetCallback(interruptPin, Pin_Any_Edge, handleInterrupt);          
+        }];
+    }
 }
 
 yt_callback_t handleInterrupt =
@@ -117,13 +123,13 @@ yt_callback_t handleInterrupt =
         // check against interrupt flags
         if (flags & pinBit)
         {
-            enum PinTransition transition = transitions[pin];
+            enum GPIOEdge transition = transitions[pin];
             bool pinSet = (values & pinBit);
 
             // if the transition matches, post callback task
-            if ((transition == Pin_Any_Edge) ||
-               ((transition == Pin_Rising_Edge) && pinSet) ||
-               ((transition == Pin_Falling_Edge) && !pinSet))
+            if ((transition == GPIOEdgeAny) ||
+               ((transition == GPIOEdgeRising) && pinSet) ||
+               ((transition == GPIOEdgeFalling) && !pinSet))
             {
                 ytPost(callbacks[pin], ytMilliseconds(0));
             }
@@ -278,7 +284,7 @@ enum PinOutput PCAL64PinGetValue(enum PCAL64PinName pinName)
     Setup interrupt handling
 */
 
-YTError PCAL64PinSetCallback(enum PCAL64PinName pinName, enum PinTransition transition, yt_callback_t callback)
+YTError PCAL64PinSetCallback(enum PCAL64PinName pinName, enum GPIOEdge transition, yt_callback_t callback)
 {
     if ((pinName < Pin_End) && (callback))
     {
@@ -415,57 +421,82 @@ void I2C1_IRQHandler()
 }
 
 
-#if 0
-/**
- * @brief
- *   Indicate plain write sequence: S+ADDR(W)+DATA0+P.
- * @details
- *   @li S - Start
- *   @li ADDR(W) - address with W/R bit cleared
- *   @li DATA0 - Data taken from buffer with index 0
- *   @li P - Stop
- */
-#define I2C_FLAG_WRITE          0x0001
 
-/**
- * @brief
- *   Indicate plain read sequence: S+ADDR(R)+DATA0+P.
- * @details
- *   @li S - Start
- *   @li ADDR(R) - address with W/R bit set
- *   @li DATA0 - Data read into buffer with index 0
- *   @li P - Stop
- */
-#define I2C_FLAG_READ           0x0002
+@implementation PCAL64Pin
+{
+    enum PCAL64PinName pin;
+    uint8_t output;
+}
 
-/**
- * @brief
- *   Indicate combined write/read sequence: S+ADDR(W)+DATA0+Sr+ADDR(R)+DATA1+P.
- * @details
- *   @li S - Start
- *   @li Sr - Repeated start
- *   @li ADDR(W) - address with W/R bit cleared
- *   @li ADDR(R) - address with W/R bit set
- *   @li DATAn - Data written from/read into buffer with index n
- *   @li P - Stop
- */
-#define I2C_FLAG_WRITE_READ     0x0004
+- (id)initWithPin:(enum PCAL64PinName) _pin
+        andIrqPin:(PinNameIntType) interruptPin
+{
+    self = [super init];
 
-/**
- * @brief
- *   Indicate write sequence using two buffers: S+ADDR(W)+DATA0+DATA1+P.
- * @details
- *   @li S - Start
- *   @li ADDR(W) - address with W/R bit cleared
- *   @li DATAn - Data written from buffer with index n
- *   @li P - Stop
- */
-#define I2C_FLAG_WRITE_WRITE    0x0008
+    if (self)
+    {
+        pin = _pin;
+        output = 1;
 
-/** Use 10 bit address. */
-#define I2C_FLAG_10BIT_ADDR     0x0010
+        PCAL64Init(interruptPin);
+    }
+
+    return self;
+}
+
+- (YTError) setHigh
+{
+    output = 1;
+    return PCAL64PinSetOutput(pin, Pin_High);
+}
+
+- (YTError) setLow
+{
+    output = 0;
+    return PCAL64PinSetOutput(pin, Pin_Low);
+}
+
+- (YTError) toggle
+{
+    output ^= 1;
+    return PCAL64PinToggle(pin);
+}
+
+- (uint8_t) getValue
+{    
+    return PCAL64PinGetValue(pin);
+}
+
+- (YTError) setValue:(uint8_t) value
+{
+    return PCAL64PinSetOutput(pin, value);
+}
+
+- (YTError) setInput
+{
+    return PCAL64PinSetMode(pin, Mode_Pin_Input, output);
+}
+
+- (YTError) setOutput
+{
+    return PCAL64PinSetMode(pin, Mode_Pin_Output, output);
+}
+
+- (YTError) attachCallback:(yt_callback_t) callback 
+                    onEdge:(enum GPIOEdge) edge
+{
+    return PCAL64PinSetCallback(pin, edge, callback);
+}
+
+- (YTError) removeCallback
+{
+    return PCAL64PinRemoveCallback(pin);
+}
 
 
 
-#endif
+
+
+@end
+
 

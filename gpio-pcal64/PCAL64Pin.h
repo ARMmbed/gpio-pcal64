@@ -1,9 +1,8 @@
-#ifndef __PCAL64_H__
-#define __PCAL64_H__
-
+#import "Foundation/NSObject.h"
 #import "gpio/GPIO.h"
 #import "yterror/YTError.h"
 
+#import "gpio/GPIOPinProtocol.h"
 
 enum PCAL64PinName {
     Pin_P0_0 = 0,
@@ -45,10 +44,14 @@ YTError PCAL64PinSetOutput(enum PCAL64PinName pin, enum PinOutput value);
 YTError PCAL64PinToggle(enum PCAL64PinName pin);
 enum PinOutput PCAL64PinGetValue(enum PCAL64PinName pin);
 
-YTError PCAL64PinSetCallback(enum PCAL64PinName pin, enum PinTransition transition, yt_callback_t callback);
+YTError PCAL64PinSetCallback(enum PCAL64PinName pinName, enum GPIOEdge transition, yt_callback_t callback);
 YTError PCAL64PinRemoveCallback(enum PCAL64PinName pinName);
 
 
+@interface PCAL64Pin : NSObject <GPIOPinProtocol>
 
+- (id)initWithPin:(enum PCAL64PinName) _pin
+        andIrqPin:(PinNameIntType) interruptPin;
 
-#endif // __PCAL64_H__
+@end
+

@@ -6,7 +6,7 @@
 #endif
 
 
-#import "gpio-pcal64/PCAL64.h"
+#import "gpio-pcal64/PCAL64Pin.h"
 
 
 yt_callback_t ioIrqHandler =
@@ -18,15 +18,19 @@ yt_callback_t ioIrqHandler =
 
 yt_callback_t startTask = 
 ^{
-    PCAL64Init(Pin_PC3);
-    PCAL64PinSetMode(Pin_P0_3, Mode_Pin_Output, Pin_Low);
+    id <GPIOPinProtocol> led = [[PCAL64Pin alloc] initWithPin:Pin_P0_3 andIrqPin:Pin_PC3];
+    id <GPIOPinProtocol> irq = [[PCAL64Pin alloc] initWithPin:Pin_P0_2 andIrqPin:Pin_PC3];
 
-    PCAL64PinSetCallback(Pin_P0_2, Pin_Falling_Edge, ioIrqHandler);
+    [led setLow];
+    [led setOutput];
+
+    [irq attachCallback:ioIrqHandler onEdge:GPIOEdgeAny];
+
 //    PCAL64SetStrength(0);
 //    PCAL64PinSetMode(0xffff, Mode_Pin_Output, 0x0000);
 
     [Yottos postCallback:^{
-                PCAL64PinToggle(Pin_P0_3);
+                [led toggle];
             }
             withPeriod:ytMilliseconds(1000)
             andTolerance:ytMilliseconds(10)];
