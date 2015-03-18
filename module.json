@@ -16,7 +16,7 @@
     }
   ],
   "dependencies": {
-    "yottos": "ARMmbed/yottos#~1.0.0",
+    "yottos": "ARMmbed/yottos#^1.1.0",
     "gpio": "ARMmbed/gpio#~1.0.0",
     "yterror": "ARMmbed/yterror#~0.0.3",
     "emlib": "ARMmbed/emlib#~3.20.9"
