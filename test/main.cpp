@@ -29,31 +29,19 @@ static DigitalOut vibra(VIBRA);
 PCAL64 ioexpander1(YOTTA_CFG_HARDWARE_TEST_PINS_I2C_SDA, YOTTA_CFG_HARDWARE_TEST_PINS_I2C_SCL, PCAL64::PRIMARY_ADDRESS, PF3);
 PCAL64 ioexpander2(YOTTA_CFG_HARDWARE_TEST_PINS_I2C_SDA, YOTTA_CFG_HARDWARE_TEST_PINS_I2C_SCL, PCAL64::SECONDARY_ADDRESS, PB6);
 
-void readDone2(int value)
+
+void io2Done(void)
 {
-    swoprintf("readDone: %02X\r\n", value);
+    swoprintf("io2Done\r\n");
 }
 
-void readDone1(int value)
+void io1Done(void)
 {
-    swoprintf("readDone: %02X\r\n", value);
+    swoprintf("io1Done\r\n");
 
-//    ioexpander2.read(PCAL64::P1_1, readDone2);
-}
-
-void writeDone(void)
-{
-    swoprintf("writeDone\r\n");
-}
-
-void modeDone(void)
-{
-    swoprintf("modeDone\r\n");
-}
-
-void toggleDone(void)
-{
-    swoprintf("toggleDone\r\n");
+    ioexpander2.set(PCAL64::P1_2, PCAL64::Output)
+               .set(PCAL64::P1_2, PCAL64::High)
+               .callback(io2Done);
 }
 
 /*****************************************************************************/
@@ -67,7 +55,7 @@ void button1Task()
 {
     swoprintf("button:\r\n");
 
-    ioexpander1.toggle(PCAL64::P0_3, toggleDone);
+    ioexpander1.toggle(PCAL64::P0_3, NULL);
 }
 
 void button1ISR()
@@ -84,5 +72,7 @@ void app_start(int, char *[])
     // setup buttons
     button1.fall(button1ISR);
 
-    ioexpander1.mode(PCAL64::P0_3, PCAL64::Output, modeDone);
+    ioexpander1.set(PCAL64::P0_5, PCAL64::Output)
+               .set(PCAL64::P0_5, PCAL64::High)
+               .callback(io1Done);
 }

@@ -56,12 +56,46 @@ public:
         Input  = 1
     } direction_t;
 
+    typedef enum {
+        Low    = 0,
+        High   = 1
+    } value_t;
+
     PCAL64(PinName _sda, PinName _scl, address_t _address, PinName _irq);
 
     bool mode(pin_t pin, direction_t direction, FunctionPointer0<void> callback);
     bool write(pin_t pin, int value, FunctionPointer0<void> callback);
     bool read(pin_t pin, FunctionPointer1<void, int> callback);
     bool toggle(pin_t pin, FunctionPointer0<void> callback);
+
+    /*************************************************************************/
+
+    class PinActionAdder
+    {
+        friend PCAL64;
+    public:
+        PinActionAdder& set(pin_t pin, direction_t direction);
+        PinActionAdder& set(pin_t pin, value_t value);
+        PinActionAdder& callback(FunctionPointer0<void> callback);
+        ~PinActionAdder();
+    private:
+        PinActionAdder(PCAL64* owner, pin_t pin, direction_t direction);
+        PinActionAdder(PCAL64* owner, pin_t pin, value_t value);
+        const PinActionAdder& operator=(const PinActionAdder& a);
+        PinActionAdder(const PinActionAdder& a);
+
+        uint16_t pins;
+        uint16_t directions;
+        uint16_t values;
+        FunctionPointer0<void> _callback;
+        bool ready;
+        PCAL64* owner;
+    };
+
+    PinActionAdder set(pin_t pin, direction_t direction);
+    PinActionAdder set(pin_t pin, value_t value);
+
+    bool bulkSet(uint16_t pins, uint16_t directions, uint16_t values, FunctionPointer0<void> callback);
 
 private:
 
@@ -94,11 +128,15 @@ private:
 
     typedef enum {
         STATE_IDLE,
-        STATE_MODE_GET,
+        STATE_DIRECTION_GET,
         STATE_WRITE_GET,
         STATE_COMMAND_DONE,
         STATE_READ_GET,
-        STATE_TOGGLE_GET
+        STATE_TOGGLE_GET,
+        STATE_BULK_VALUE_GET,
+        STATE_BULK_VALUE_SET,
+        STATE_BULK_DIRECTION_GET,
+        STATE_BULK_DIRECTION_SET
     } state_t;
 
     typedef union {
@@ -123,6 +161,10 @@ private:
     state_t     state;
     pin_t       currentPin;
     parameter_t current;
+
+    uint16_t bulkPins;
+    uint16_t bulkDirections;
+    uint16_t bulkValues;
 
     char memoryWrite[3];
     char memoryRead[2];
