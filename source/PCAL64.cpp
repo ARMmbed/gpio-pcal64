@@ -35,6 +35,7 @@ PCAL64::PCAL64(PinName _sda, PinName _scl, address_t _address, PinName _irq)
 {
     i2c.frequency(400000);
 
+    irq.mode(PullUp);
     irq.fall(this, &PCAL64::interruptISR);
 
     printf("PCAL64: %02X\r\n", address);
@@ -373,22 +374,22 @@ void PCAL64::interruptTask()
 
 PCAL64::PinActionAdder::PinActionAdder(PCAL64* _owner, pin_t pin, direction_t direction)
     :   pins(1 << pin),
-        values(0xFFFF),
+        values(0),
         _callback((void (*)(void)) NULL),
         ready(false),
         owner(_owner)
 {
-    directions = 0xFFFF & (direction << pin);
+    directions = direction << pin;
 }
 
 PCAL64::PinActionAdder::PinActionAdder(PCAL64* _owner, pin_t pin, value_t value)
     :   pins(1 << pin),
-        directions(0xFFFF),
+        directions(0),
         _callback((void (*)(void)) NULL),
         ready(false),
         owner(_owner)
 {
-    values = 0xFFFF & (value << pin);
+    values = value << pin;
 }
 
 const PCAL64::PinActionAdder& PCAL64::PinActionAdder::operator=(const PCAL64::PinActionAdder& adder)
@@ -419,7 +420,7 @@ PCAL64::PinActionAdder::~PinActionAdder()
 PCAL64::PinActionAdder& PCAL64::PinActionAdder::set(pin_t pin, direction_t direction)
 {
     pins |= 1 << pin;
-    directions &= direction << pin;
+    directions |= direction << pin;
     ready = true;
 
     return *this;
@@ -428,7 +429,7 @@ PCAL64::PinActionAdder& PCAL64::PinActionAdder::set(pin_t pin, direction_t direc
 PCAL64::PinActionAdder& PCAL64::PinActionAdder::set(pin_t pin, value_t value)
 {
     pins |= 1 << pin;
-    values &= value << pin;
+    values |= value << pin;
     ready = true;
 
     return *this;

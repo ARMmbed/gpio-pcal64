@@ -19,16 +19,20 @@
 
 #include "gpio-pcal64/PCAL64.h"
 
-// vibra off, DigitalOut is 0 by default
-static DigitalOut vibra(VIBRA);
 
 /*****************************************************************************/
 /* PCAL64                                                                    */
 /*****************************************************************************/
 
-PCAL64 ioexpander1(YOTTA_CFG_HARDWARE_TEST_PINS_I2C_SDA, YOTTA_CFG_HARDWARE_TEST_PINS_I2C_SCL, PCAL64::PRIMARY_ADDRESS, PF3);
-PCAL64 ioexpander2(YOTTA_CFG_HARDWARE_TEST_PINS_I2C_SDA, YOTTA_CFG_HARDWARE_TEST_PINS_I2C_SCL, PCAL64::SECONDARY_ADDRESS, PB6);
+PCAL64 ioexpander1(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_I2C_SDA,
+                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_I2C_SCL,
+                   PCAL64::PRIMARY_ADDRESS,
+                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_PIN_IRQ1);
 
+PCAL64 ioexpander2(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_I2C_SDA,
+                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_I2C_SCL,
+                   PCAL64::SECONDARY_ADDRESS,
+                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_PIN_IRQ2);
 
 void io2Done(void)
 {
@@ -39,9 +43,16 @@ void io1Done(void)
 {
     swoprintf("io1Done\r\n");
 
-    ioexpander2.set(PCAL64::P1_2, PCAL64::Output)
+    ioexpander2.set(PCAL64::P0_6, PCAL64::Output)
+               .set(PCAL64::P0_6, PCAL64::High)
+               // NFC
+               .set(PCAL64::P0_3, PCAL64::Output)
+               .set(PCAL64::P0_3, PCAL64::High)
+               // BLE
+               .set(PCAL64::P1_2, PCAL64::Output)
                .set(PCAL64::P1_2, PCAL64::High)
                .callback(io2Done);
+
 }
 
 /*****************************************************************************/
@@ -49,13 +60,13 @@ void io1Done(void)
 /*****************************************************************************/
 
 // enable buttons to initiate transfer
-static InterruptIn button1(BTN1);
+static InterruptIn button1(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_BUTTON_PIN_FORWARD);
 
 void button1Task()
 {
     swoprintf("button:\r\n");
 
-    ioexpander1.toggle(PCAL64::P0_3, NULL);
+    ioexpander2.toggle(PCAL64::P0_6, NULL);
 }
 
 void button1ISR()
