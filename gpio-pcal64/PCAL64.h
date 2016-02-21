@@ -18,9 +18,9 @@
 #define __GPIO_PCAL64_H__
 
 #include "mbed-drivers/mbed.h"
+#include "wrd-utilities/I2CEx.h"
 
 using namespace mbed::util;
-
 
 class PCAL64
 {
@@ -61,12 +61,12 @@ public:
         High   = 1
     } value_t;
 
-    PCAL64(PinName _sda, PinName _scl, address_t _address, PinName _irq);
+    PCAL64(I2CEx& _i2c, address_t _address, PinName _irq);
 
-    bool mode(pin_t pin, direction_t direction, FunctionPointer0<void> callback);
-    bool write(pin_t pin, int value, FunctionPointer0<void> callback);
-    bool read(pin_t pin, FunctionPointer1<void, int> callback);
-    bool toggle(pin_t pin, FunctionPointer0<void> callback);
+    bool mode(int pin, direction_t direction, FunctionPointer0<void> callback);
+    bool write(int pin, int value, FunctionPointer0<void> callback);
+    bool read(int pin, FunctionPointer1<void, int> callback);
+    bool toggle(int pin, FunctionPointer0<void> callback);
 
     /*************************************************************************/
 
@@ -74,13 +74,13 @@ public:
     {
         friend PCAL64;
     public:
-        PinActionAdder& set(pin_t pin, direction_t direction);
-        PinActionAdder& set(pin_t pin, value_t value);
+        PinActionAdder& set(int pin, direction_t direction);
+        PinActionAdder& set(int pin, int value);
         PinActionAdder& callback(FunctionPointer0<void> callback);
         ~PinActionAdder();
     private:
-        PinActionAdder(PCAL64* owner, pin_t pin, direction_t direction);
-        PinActionAdder(PCAL64* owner, pin_t pin, value_t value);
+        PinActionAdder(PCAL64* owner, int pin, direction_t direction);
+        PinActionAdder(PCAL64* owner, int pin, int value);
         const PinActionAdder& operator=(const PinActionAdder& a);
         PinActionAdder(const PinActionAdder& a);
 
@@ -92,8 +92,8 @@ public:
         PCAL64* owner;
     };
 
-    PinActionAdder set(pin_t pin, direction_t direction);
-    PinActionAdder set(pin_t pin, value_t value);
+    PinActionAdder set(int pin, direction_t direction);
+    PinActionAdder set(int pin, int value);
 
     bool bulkSet(uint16_t pins, uint16_t directions, uint16_t values, FunctionPointer0<void> callback);
 
@@ -144,22 +144,22 @@ private:
         int         value;
     } parameter_t;
 
-    int getRegister(register_t reg);
-    void getRegisterDone(Buffer txBuffer, Buffer rxBuffer, int code);
+    void getRegister(register_t reg);
+    void getRegisterDone(void);
 
-    int setRegister(register_t reg, uint16_t value);
-    void setRegisterDone(Buffer txBuffer, Buffer rxBuffer, int code);
+    void setRegister(register_t reg, uint16_t value);
+    void setRegisterDone(void);
 
     void eventHandler(uint16_t value);
     void interruptISR(void);
     void interruptTask(void);
 
-    I2C i2c;
+    I2CEx& i2c;
     address_t address;
     InterruptIn irq;
 
     state_t     state;
-    pin_t       currentPin;
+    int       currentPin;
     parameter_t current;
 
     uint16_t bulkPins;

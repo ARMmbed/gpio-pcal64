@@ -16,15 +16,15 @@
 
 #include "gpio-pcal64/PCAL64.h"
 
-#if 1
+#if 0
 #include "swo/swo.h"
 #define printf(...) { swoprintf(__VA_ARGS__); }
 #else
 #define printf(...)
 #endif
 
-PCAL64::PCAL64(PinName _sda, PinName _scl, address_t _address, PinName _irq)
-    :   i2c(_sda, _scl),
+PCAL64::PCAL64(I2CEx& _i2c, address_t _address, PinName _irq)
+    :   i2c(_i2c),
         address(_address),
         irq(_irq),
         state(STATE_IDLE),
@@ -41,97 +41,89 @@ PCAL64::PCAL64(PinName _sda, PinName _scl, address_t _address, PinName _irq)
     printf("PCAL64: %02X\r\n", address);
 }
 
-bool PCAL64::mode(pin_t pin, direction_t direction, FunctionPointer0<void> callback)
+bool PCAL64::mode(int pin, direction_t direction, FunctionPointer0<void> callback)
 {
     bool result = false;
 
     if (pin < Pin_End)
     {
-        int retval = getRegister(CONFIGURATION_PORT_0);
+        getRegister(CONFIGURATION_PORT_0);
 
-        if (retval != -1)
-        {
-            currentPin = pin;
-            current.direction = direction;
-            commandCallback = callback;
-            state = STATE_DIRECTION_GET;
-            result = true;
-        }
+        currentPin = pin;
+        current.direction = direction;
+        commandCallback = callback;
+        state = STATE_DIRECTION_GET;
+
+        result = true;
     }
 
     return result;
 }
 
 
-bool PCAL64::write(pin_t pin, int value, FunctionPointer0<void> callback)
+bool PCAL64::write(int pin, int value, FunctionPointer0<void> callback)
 {
     bool result = false;
 
     if (pin < Pin_End)
     {
-        int retval = getRegister(OUTPUT_PORT_0);
+        getRegister(OUTPUT_PORT_0);
 
-        if (retval != -1)
-        {
-            currentPin = pin;
-            current.value = value;
-            commandCallback = callback;
-            state = STATE_WRITE_GET;
-            result = true;
-        }
+        currentPin = pin;
+        current.value = value;
+        commandCallback = callback;
+        state = STATE_WRITE_GET;
+
+        result = true;
     }
 
     return result;
 }
 
-bool PCAL64::read(pin_t pin, FunctionPointer1<void, int> callback)
+bool PCAL64::read(int pin, FunctionPointer1<void, int> callback)
 {
     bool result = false;
 
     if (pin < Pin_End)
     {
-        int retval = getRegister(INPUT_PORT_0);
+        getRegister(INPUT_PORT_0);
 
-        if (retval != -1)
-        {
-            currentPin = pin;
-            readCallback = callback;
-            state = STATE_READ_GET;
-            result = true;
-        }
+        currentPin = pin;
+        readCallback = callback;
+        state = STATE_READ_GET;
+
+        result = true;
     }
 
     return result;
 }
 
-bool PCAL64::toggle(pin_t pin, FunctionPointer0<void> callback)
+bool PCAL64::toggle(int pin, FunctionPointer0<void> callback)
 {
     bool result = false;
 
     if (pin < Pin_End)
     {
-        int retval = getRegister(OUTPUT_PORT_0);
+        getRegister(OUTPUT_PORT_0);
 
-        if (retval != -1)
-        {
-            currentPin = pin;
-            commandCallback = callback;
-            state = STATE_TOGGLE_GET;
-            result = true;
-        }
+        currentPin = pin;
+        commandCallback = callback;
+        state = STATE_TOGGLE_GET;
+
+        result = true;
     }
 
     return result;
 }
 
-PCAL64::PinActionAdder PCAL64::set(pin_t pin, direction_t direction)
+PCAL64::PinActionAdder PCAL64::set(int pin, direction_t direction)
 {
     PinActionAdder adder(this, pin, direction);
 
     return adder;
 }
 
-PCAL64::PinActionAdder PCAL64::set(pin_t pin, value_t value)
+PCAL64::PinActionAdder PCAL64::set(int pin, int value)
 {
     PinActionAdder adder(this, pin, value);
 
@@ -140,22 +132,16 @@ PCAL64::PinActionAdder PCAL64::set(pin_t pin, value_t value)
 
 bool PCAL64::bulkSet(uint16_t pins, uint16_t directions, uint16_t values, FunctionPointer0<void> callback)
 {
-    bool result = false;
+    getRegister(OUTPUT_PORT_0);
 
-    int retval = getRegister(OUTPUT_PORT_0);
+    bulkPins = pins;
+    bulkDirections = directions;
+    bulkValues = values;
+    commandCallback = callback;
 
-    if (retval != -1)
-    {
-        bulkPins = pins;
-        bulkDirections = directions;
-        bulkValues = values;
-        commandCallback = callback;
+    state = STATE_BULK_VALUE_GET;
 
-        state = STATE_BULK_VALUE_GET;
-        result = true;
-    }
-
-    return result;
+    return true;
 }
 
 
@@ -163,44 +149,33 @@ bool PCAL64::bulkSet(uint16_t pins, uint16_t directions, uint16_t values, Functi
 /*  Generic functions for reading and writing registers.                     */
 /*****************************************************************************/
 
-int PCAL64::getRegister(register_t reg)
+void PCAL64::getRegister(register_t reg)
 {
-    memoryWrite[0] = reg;
+    FunctionPointer0<void> callback(this, &PCAL64::getRegisterDone);
 
-    I2C::event_callback_t callback(this, &PCAL64::getRegisterDone);
-
-    return i2c.transfer(address, memoryWrite, 1, memoryRead, 2, callback);
+    i2c.read(address, reg, memoryRead, 2, callback);
 }
 
-void PCAL64::getRegisterDone(Buffer txBuffer, Buffer rxBuffer, int code)
+void PCAL64::getRegisterDone(void)
 {
-    (void) txBuffer;
-    (void) rxBuffer;
-    (void) code;
-
     uint16_t value = ((uint16_t) memoryRead[1] << 8) | memoryRead[0];
 
     FunctionPointer1<void, uint16_t> fp(this, &PCAL64::eventHandler);
     minar::Scheduler::postCallback(fp.bind(value));
 }
 
-int PCAL64::setRegister(register_t reg, uint16_t value)
+void PCAL64::setRegister(register_t reg, uint16_t value)
 {
-    memoryWrite[0] = reg;
-    memoryWrite[1] = value;
-    memoryWrite[2] = value >> 8;
+    memoryWrite[0] = value;
+    memoryWrite[1] = value >> 8;
 
-    I2C::event_callback_t callback(this, &PCAL64::setRegisterDone);
+    FunctionPointer0<void> callback(this, &PCAL64::setRegisterDone);
 
-    return i2c.transfer(address, memoryWrite, 3, memoryRead, 0, callback);
+    i2c.write(address, reg, memoryWrite, 2, callback);
 }
 
-void PCAL64::setRegisterDone(Buffer txBuffer, Buffer rxBuffer, int code)
+void PCAL64::setRegisterDone(void)
 {
-    (void) txBuffer;
-    (void) rxBuffer;
-    (void) code;
-
     FunctionPointer1<void, uint16_t> fp(this, &PCAL64::eventHandler);
     minar::Scheduler::postCallback(fp.bind(0));
 }
@@ -372,7 +347,7 @@ void PCAL64::interruptTask()
 
 /*****************************************************************************/
 
-PCAL64::PinActionAdder::PinActionAdder(PCAL64* _owner, pin_t pin, direction_t direction)
+PCAL64::PinActionAdder::PinActionAdder(PCAL64* _owner, int pin, direction_t direction)
     :   pins(1 << pin),
         values(0),
         _callback((void (*)(void)) NULL),
@@ -382,7 +357,7 @@ PCAL64::PinActionAdder::PinActionAdder(PCAL64* _owner, pin_t pin, direction_t di
     directions = direction << pin;
 }
 
-PCAL64::PinActionAdder::PinActionAdder(PCAL64* _owner, pin_t pin, value_t value)
+PCAL64::PinActionAdder::PinActionAdder(PCAL64* _owner, int pin, int value)
     :   pins(1 << pin),
         directions(0),
         _callback((void (*)(void)) NULL),
@@ -417,7 +392,7 @@ PCAL64::PinActionAdder::~PinActionAdder()
     }
 }
 
-PCAL64::PinActionAdder& PCAL64::PinActionAdder::set(pin_t pin, direction_t direction)
+PCAL64::PinActionAdder& PCAL64::PinActionAdder::set(int pin, direction_t direction)
 {
     pins |= 1 << pin;
     directions |= direction << pin;
@@ -426,7 +401,7 @@ PCAL64::PinActionAdder& PCAL64::PinActionAdder::set(pin_t pin, direction_t direc
     return *this;
 }
 
-PCAL64::PinActionAdder& PCAL64::PinActionAdder::set(pin_t pin, value_t value)
+PCAL64::PinActionAdder& PCAL64::PinActionAdder::set(int pin, int value)
 {
     pins |= 1 << pin;
     values |= value << pin;

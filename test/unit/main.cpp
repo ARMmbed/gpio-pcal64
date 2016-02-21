@@ -17,6 +17,7 @@
 #include "mbed-drivers/mbed.h"
 #include "swo/swo.h"
 
+#include "wrd-utilities/SharedModules.h"
 #include "gpio-pcal64/PCAL64.h"
 
 
@@ -24,13 +25,11 @@
 /* PCAL64                                                                    */
 /*****************************************************************************/
 
-PCAL64 ioexpander1(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_I2C_SDA,
-                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_I2C_SCL,
+PCAL64 ioexpander1(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_I2C_NAME,
                    PCAL64::PRIMARY_ADDRESS,
                    YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_PIN_IRQ1);
 
-PCAL64 ioexpander2(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_I2C_SDA,
-                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_I2C_SCL,
+PCAL64 ioexpander2(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_I2C_NAME,
                    PCAL64::SECONDARY_ADDRESS,
                    YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_PIN_IRQ2);
 
