@@ -15,43 +15,41 @@
  */
 
 #include "mbed-drivers/mbed.h"
-#include "swo/swo.h"
-
-#include "wrd-utilities/SharedModules.h"
 #include "gpio-pcal64/PCAL64.h"
 
+#include "swo/swo.h"
+#define printf swoprintf
 
 /*****************************************************************************/
 /* PCAL64                                                                    */
 /*****************************************************************************/
 
-PCAL64 ioexpander1(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_I2C_NAME,
-                   PCAL64::PRIMARY_ADDRESS,
-                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_PIN_IRQ1);
+PCAL64 ioexpander0(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_GPIO0_I2C_SDA,
+                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_GPIO0_I2C_SCL,
+                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_GPIO0_I2C_ADDRESS,
+                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_GPIO0_IRQ_PIN);
 
-PCAL64 ioexpander2(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_I2C_NAME,
-                   PCAL64::SECONDARY_ADDRESS,
-                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_PIN_IRQ2);
+PCAL64 ioexpander1(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_GPIO1_I2C_SDA,
+                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_GPIO1_I2C_SCL,
+                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_GPIO1_I2C_ADDRESS,
+                   YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_EXTERNAL_GPIO_GPIO1_IRQ_PIN);
 
-void io2Done(void)
+
+void irqHandler(uint16_t address, uint32_t pins, uint32_t values)
 {
-    swoprintf("io2Done\r\n");
+    printf("%02X: %lu %lu\r\n", address, pins, values);
 }
 
-void io1Done(void)
+void writeDone(void)
 {
-    swoprintf("io1Done\r\n");
 
-    ioexpander2.set(PCAL64::P0_6, PCAL64::Output)
-               .set(PCAL64::P0_6, PCAL64::High)
-               // NFC
-               .set(PCAL64::P0_3, PCAL64::Output)
-               .set(PCAL64::P0_3, PCAL64::High)
-               // BLE
-               .set(PCAL64::P1_2, PCAL64::Output)
-               .set(PCAL64::P1_2, PCAL64::High)
-               .callback(io2Done);
+}
 
+void readDone(uint32_t values)
+{
+    printf("%lu\r\n", values);
+
+    ioexpander1.bulkWrite(PCAL64::P0_6, PCAL64::P0_6, PCAL64::P0_6, writeDone);
 }
 
 /*****************************************************************************/
@@ -59,13 +57,16 @@ void io1Done(void)
 /*****************************************************************************/
 
 // enable buttons to initiate transfer
-static InterruptIn button1(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_BUTTON_PIN_FORWARD);
+static InterruptIn button1(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_BUTTON_FORWARD_GPIO_PIN);
+
+void toggleDone()
+{
+    printf("toggle done\r\n");
+}
 
 void button1Task()
 {
-    swoprintf("button:\r\n");
-
-    ioexpander2.toggle(PCAL64::P0_6, NULL);
+    ioexpander1.bulkToggle(PCAL64::P0_6, toggleDone);
 }
 
 void button1ISR()
@@ -79,10 +80,13 @@ void button1ISR()
 
 void app_start(int, char *[])
 {
+    printf("hello\r\n");
+
     // setup buttons
     button1.fall(button1ISR);
 
-    ioexpander1.set(PCAL64::P0_5, PCAL64::Output)
-               .set(PCAL64::P0_5, PCAL64::High)
-               .callback(io1Done);
+    ioexpander0.setInterruptHandler(irqHandler);
+    ioexpander1.setInterruptHandler(irqHandler);
+
+    ioexpander0.bulkRead(readDone);
 }

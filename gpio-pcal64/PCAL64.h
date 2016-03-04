@@ -18,7 +18,7 @@
 #define __GPIO_PCAL64_H__
 
 #include "mbed-drivers/mbed.h"
-#include "wrd-utilities/I2CEx.h"
+#include "wrd-utilities/I2CRegister.h"
 
 using namespace mbed::util;
 
@@ -32,72 +32,134 @@ public:
 
     typedef enum {
         P0_0 = 0,
-        P0_1 = 1,
-        P0_2 = 2,
-        P0_3 = 3,
-        P0_4 = 4,
-        P0_5 = 5,
-        P0_6 = 6,
-        P0_7 = 7,
+        P0_1 = (1 <<  1),
+        P0_2 = (1 <<  2),
+        P0_3 = (1 <<  3),
+        P0_4 = (1 <<  4),
+        P0_5 = (1 <<  5),
+        P0_6 = (1 <<  6),
+        P0_7 = (1 <<  7),
 
-        P1_0 = 8,
-        P1_1 = 9,
-        P1_2 = 10,
-        P1_3 = 11,
-        P1_4 = 12,
-        P1_5 = 13,
-        P1_6 = 14,
-        P1_7 = 15,
+        P1_0 = (1 <<  8),
+        P1_1 = (1 <<  9),
+        P1_2 = (1 << 10),
+        P1_3 = (1 << 11),
+        P1_4 = (1 << 12),
+        P1_5 = (1 << 13),
+        P1_6 = (1 << 14),
+        P1_7 = (1 << 15),
         Pin_End
     } pin_t;
 
-    typedef enum {
-        Output = 0,
-        Input  = 1
-    } direction_t;
+    PCAL64(PinName sda, PinName scl, uint16_t address, PinName irq = NC);
+    ~PCAL64(void);
 
-    typedef enum {
-        Low    = 0,
-        High   = 1
-    } value_t;
+    /**
+     * @brief Read pin values.
+     * @details The result is passed as a parameter in the callback function.
+     *
+     * @param callback Function with pin values as parameter.
+     * @return Boolean result. True means command was accepted, False means it was not.
+     */
+    bool bulkRead(FunctionPointer1<void, uint32_t> callback);
 
-    PCAL64(I2CEx& _i2c, address_t _address, PinName _irq);
+    /**
+     * @brief Set direction and values for at most 32 pins.
+     * @details Pins are labeled LSB. For I/O expanders with less than 32 pins
+     *          the higher bits are ignored. I/O expanders with more than 32 pins
+     *          are not supported.
+     *
+     * @param pins The pins affected by this call are set high in bitmap (LSB).
+     * @param directions Pin directions. 0 means input, 1 means output.
+     * @param values Pin values. 0 means low, 1 means high.
+     * @param callback Function to call when I/O expander is ready for next command.
+     * @return Boolean result. True means command was accepted, False means it was not.
+     */
+    bool bulkWrite(uint32_t pins, uint32_t directions, uint32_t values, FunctionPointer0<void> callback);
 
-    bool mode(int pin, direction_t direction, FunctionPointer0<void> callback);
-    bool write(int pin, int value, FunctionPointer0<void> callback);
-    bool read(int pin, FunctionPointer1<void, int> callback);
-    bool toggle(int pin, FunctionPointer0<void> callback);
+    /**
+     * @brief Toggles output on given pins.
+     * @details Only affects pins that are already set to output.
+     *
+     * @param pins The pins affected by this call are set high in bitmap (LSB).
+     * @param callback Function to call when I/O expander is ready for next command.
+     * @return Boolean result. True means command was accepted, False means it was not.
+     */
+    bool bulkToggle(uint32_t pins, FunctionPointer0<void> callback);
 
-    /*************************************************************************/
+    /**
+     * @brief Set pins to be trigger interrupts.
+     * @details When interrupts are triggered the callback handler contains the pin values.
+     *
+     * @param pins Pins affected by this call.
+     * @param values Interrupt mask. 0 interrupt is disabled, 1 interrupt is enabled.
+     * @param callback Function is called when next command can be send.
+     * @return Boolean result. True means command was accepted, False means it was not.
+     */
+    bool bulkSetInterrupt(uint32_t pins, uint32_t values, FunctionPointer0<void> callback);
 
-    class PinActionAdder
-    {
-        friend PCAL64;
-    public:
-        PinActionAdder& set(int pin, direction_t direction);
-        PinActionAdder& set(int pin, int value);
-        PinActionAdder& callback(FunctionPointer0<void> callback);
-        ~PinActionAdder();
-    private:
-        PinActionAdder(PCAL64* owner, int pin, direction_t direction);
-        PinActionAdder(PCAL64* owner, int pin, int value);
-        const PinActionAdder& operator=(const PinActionAdder& a);
-        PinActionAdder(const PinActionAdder& a);
+    /**
+     * @brief Interrupt callback function.
+     * @details The callback function has the I2C address, fired pins, and pin values
+     *          as parameters. The address is passed so a single callback function can
+     *          handle multiple expanders. The pins and values are useful for determining
+     *          which pins have fired and what edge triggered the interrupt.
+     *
+     * @param uint16_t address
+     * @param uint32_t pins
+     * @param uint32_t values
+     */
+    typedef FunctionPointer3<void, uint16_t, uint32_t, uint32_t> IRQCallback_t;
 
-        uint16_t pins;
-        uint16_t directions;
-        uint16_t values;
-        FunctionPointer0<void> _callback;
-        bool ready;
-        PCAL64* owner;
-    };
+    /**
+     * @brief Callback function for when interrupts have fired.
+     * @details The fired pins and values are passes as arguments in callback function.
+     *
+     * @param callback Parameters: address, fired pins, and pin values.
+     */
+    void setInterruptHandler(IRQCallback_t callback);
 
-    PinActionAdder set(int pin, direction_t direction);
-    PinActionAdder set(int pin, int value);
-
-    bool bulkSet(uint16_t pins, uint16_t directions, uint16_t values, FunctionPointer0<void> callback);
+    /**
+     * @brief Clear handler set with setInterruptHandler.
+     */
+    void clearInterruptHandler(void);
 
 private:
+
+    void eventHandler(void);
+    void internalIRQHandler(void);
+
+    I2CRegister i2c;
+    uint16_t address;
+    InterruptIn irq;
+
+    uint32_t pins;
+    uint32_t param1;
+    uint32_t param2;
+    uint32_t cache;
+
+    uint8_t readBuffer[2];
+
+    FunctionPointer0<void>                               externalDoneHandler;
+    FunctionPointer1<void, uint32_t>                     externalReadHandler;
+    FunctionPointer3<void, uint16_t, uint32_t, uint32_t> externalIRQHandler;
+
+    typedef enum {
+        STATE_READ_GET,
+        STATE_WRITE_GET_DIRECTIONS,
+        STATE_WRITE_SET_DIRECTIONS,
+        STATE_WRITE_GET_VALUES,
+        STATE_TOGGLE_GET_VALUES,
+        STATE_INTERRUPT_GET_DIRECTIONS,
+        STATE_INTERRUPT_SET_DIRECTIONS,
+        STATE_INTERRUPT_GET_MASK,
+        STATE_INTERRUPT_GET_VALUES,
+        STATE_INTERRUPT_GET_STATUS,
+        STATE_SIGNAL_DONE,
+        STATE_IDLE
+    } state_t;
+
+    state_t state;
 
     typedef enum {
         INPUT_PORT_0                    = 0x00,
@@ -125,52 +187,6 @@ private:
         INTERRUPT_STATUS_1              = 0x4D,
         OUTPUT_PORT_CONFIGURATION       = 0x4F
     } register_t;
-
-    typedef enum {
-        STATE_IDLE,
-        STATE_DIRECTION_GET,
-        STATE_WRITE_GET,
-        STATE_COMMAND_DONE,
-        STATE_READ_GET,
-        STATE_TOGGLE_GET,
-        STATE_BULK_VALUE_GET,
-        STATE_BULK_VALUE_SET,
-        STATE_BULK_DIRECTION_GET,
-        STATE_BULK_DIRECTION_SET
-    } state_t;
-
-    typedef union {
-        direction_t direction;
-        int         value;
-    } parameter_t;
-
-    void getRegister(register_t reg);
-    void getRegisterDone(void);
-
-    void setRegister(register_t reg, uint16_t value);
-    void setRegisterDone(void);
-
-    void eventHandler(uint16_t value);
-    void interruptISR(void);
-    void interruptTask(void);
-
-    I2CEx& i2c;
-    address_t address;
-    InterruptIn irq;
-
-    state_t     state;
-    int       currentPin;
-    parameter_t current;
-
-    uint16_t bulkPins;
-    uint16_t bulkDirections;
-    uint16_t bulkValues;
-
-    char memoryWrite[3];
-    char memoryRead[2];
-
-    FunctionPointer0<void>      commandCallback;
-    FunctionPointer1<void, int> readCallback;
 };
 
 #endif // __GPIO_PCAL64_H__

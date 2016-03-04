@@ -16,404 +16,341 @@
 
 #include "gpio-pcal64/PCAL64.h"
 
-#if 0
-#include "swo/swo.h"
-#define printf(...) { swoprintf(__VA_ARGS__); }
-#else
-#define printf(...)
-#endif
-
-PCAL64::PCAL64(I2CEx& _i2c, address_t _address, PinName _irq)
-    :   i2c(_i2c),
+PCAL64::PCAL64(PinName sda, PinName scl, uint16_t _address, PinName _irq)
+    :   i2c(sda, scl),
         address(_address),
         irq(_irq),
-        state(STATE_IDLE),
-        currentPin(Pin_End),
-        bulkPins(0),
-        bulkDirections(0),
-        bulkValues(0)
+        state(STATE_IDLE)
 {
     i2c.frequency(400000);
 
-    irq.mode(PullUp);
-    irq.fall(this, &PCAL64::interruptISR);
-
-    printf("PCAL64: %02X\r\n", address);
-}
-
-bool PCAL64::mode(int pin, direction_t direction, FunctionPointer0<void> callback)
-{
-    bool result = false;
-
-    if (pin < Pin_End)
+    if (_irq != NC)
     {
-        getRegister(CONFIGURATION_PORT_0);
-
-        currentPin = pin;
-        current.direction = direction;
-        commandCallback = callback;
-        state = STATE_DIRECTION_GET;
-
-        result = true;
+        irq.fall(this, &PCAL64::internalIRQHandler);
     }
-
-    return result;
 }
 
+PCAL64::~PCAL64()
+{
+    irq.fall(NULL);
+}
 
-bool PCAL64::write(int pin, int value, FunctionPointer0<void> callback)
+bool PCAL64::bulkRead(FunctionPointer1<void, uint32_t> callback)
 {
     bool result = false;
 
-    if (pin < Pin_End)
+    if (state == STATE_IDLE)
     {
-        getRegister(OUTPUT_PORT_0);
-
-        currentPin = pin;
-        current.value = value;
-        commandCallback = callback;
-        state = STATE_WRITE_GET;
-
-        result = true;
-    }
-
-    return result;
-}
-
-bool PCAL64::read(int pin, FunctionPointer1<void, int> callback)
-{
-    bool result = false;
-
-    if (pin < Pin_End)
-    {
-        getRegister(INPUT_PORT_0);
-
-        currentPin = pin;
-        readCallback = callback;
         state = STATE_READ_GET;
+        externalReadHandler = callback;
 
-        result = true;
+        FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+        result = i2c.read(address, INPUT_PORT_0, readBuffer, 2, fp);
     }
 
     return result;
 }
 
-bool PCAL64::toggle(int pin, FunctionPointer0<void> callback)
+bool PCAL64::bulkWrite(uint32_t _pins, uint32_t directions, uint32_t values, FunctionPointer0<void> callback)
 {
     bool result = false;
 
-    if (pin < Pin_End)
+    if (state == STATE_IDLE)
     {
-        getRegister(OUTPUT_PORT_0);
+        state = STATE_WRITE_GET_DIRECTIONS;
+        externalDoneHandler = callback;
 
-        currentPin = pin;
-        commandCallback = callback;
-        state = STATE_TOGGLE_GET;
+        pins = _pins;
 
-        result = true;
+        /* NOTE: the PCAL64 defines 0 to be output and 1 to be input.
+           This is opposite from the gpio-expander API, hence the invesion.
+        */
+        param1 = ~directions;
+        param2 = values;
+
+        FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+        result = i2c.read(address, CONFIGURATION_PORT_0, readBuffer, 2, fp);
     }
 
     return result;
 }
 
-PCAL64::PinActionAdder PCAL64::set(int pin, direction_t direction)
+bool PCAL64::bulkToggle(uint32_t _pins, FunctionPointer0<void> callback)
 {
-    PinActionAdder adder(this, pin, direction);
+    bool result = false;
 
-    return adder;
+    if (state == STATE_IDLE)
+    {
+        state = STATE_TOGGLE_GET_VALUES;
+        externalDoneHandler = callback;
+
+        pins = _pins;
+
+        FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+        result = i2c.read(address, OUTPUT_PORT_0, readBuffer, 2, fp);
+    }
+
+    return result;
 }
 
-PCAL64::PinActionAdder PCAL64::set(int pin, int value)
+bool PCAL64::bulkSetInterrupt(uint32_t _pins, uint32_t values, FunctionPointer0<void> callback)
 {
-    PinActionAdder adder(this, pin, value);
+    bool result = false;
 
-    return adder;
+    if (state == STATE_IDLE)
+    {
+        state = STATE_INTERRUPT_GET_DIRECTIONS;
+        externalDoneHandler = callback;
+
+        pins = _pins;
+        param1 = values;
+
+        FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+        result = i2c.read(address, CONFIGURATION_PORT_0, readBuffer, 2, fp);
+    }
+
+    return result;
 }
 
-bool PCAL64::bulkSet(uint16_t pins, uint16_t directions, uint16_t values, FunctionPointer0<void> callback)
+void PCAL64::setInterruptHandler(FunctionPointer3<void, uint16_t, uint32_t, uint32_t> callback)
 {
-    getRegister(OUTPUT_PORT_0);
-
-    bulkPins = pins;
-    bulkDirections = directions;
-    bulkValues = values;
-    commandCallback = callback;
-
-    state = STATE_BULK_VALUE_GET;
-
-    return true;
+    externalIRQHandler = callback;
 }
 
-
-/*****************************************************************************/
-/*  Generic functions for reading and writing registers.                     */
-/*****************************************************************************/
-
-void PCAL64::getRegister(register_t reg)
+void PCAL64::clearInterruptHandler(void)
 {
-    FunctionPointer0<void> callback(this, &PCAL64::getRegisterDone);
-
-    i2c.read(address, reg, memoryRead, 2, callback);
+    externalIRQHandler.clear();
 }
 
-void PCAL64::getRegisterDone(void)
+void PCAL64::internalIRQHandler(void)
 {
-    uint16_t value = ((uint16_t) memoryRead[1] << 8) | memoryRead[0];
+    if (state == STATE_IDLE)
+    {
+        state = STATE_INTERRUPT_GET_VALUES;
 
-    FunctionPointer1<void, uint16_t> fp(this, &PCAL64::eventHandler);
-    minar::Scheduler::postCallback(fp.bind(value));
+        FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+        i2c.read(address, INPUT_PORT_0, readBuffer, 2, fp);
+    }
+    else
+    {
+        // transfer in progress, repost IRQ handler with 1 ms delay
+        minar::Scheduler::postCallback(this, &PCAL64::internalIRQHandler)
+            .delay(minar::milliseconds(1))
+            .tolerance(1);
+    }
 }
 
-void PCAL64::setRegister(register_t reg, uint16_t value)
+void PCAL64::eventHandler()
 {
-    memoryWrite[0] = value;
-    memoryWrite[1] = value >> 8;
-
-    FunctionPointer0<void> callback(this, &PCAL64::setRegisterDone);
-
-    i2c.write(address, reg, memoryWrite, 2, callback);
-}
-
-void PCAL64::setRegisterDone(void)
-{
-    FunctionPointer1<void, uint16_t> fp(this, &PCAL64::eventHandler);
-    minar::Scheduler::postCallback(fp.bind(0));
-}
-
-/*
-    Main event handler
-*/
-void PCAL64::eventHandler(uint16_t value)
-{
-    printf("event: %02X\r\n", value);
-
     switch (state)
     {
-        case STATE_DIRECTION_GET:
-            {
-                uint16_t pinBit = 1 << currentPin;
-                uint16_t config = value;
-
-                // compare change
-                if ((current.direction == PCAL64::Input) && !(config & pinBit))
-                {
-                    config |= pinBit;
-                }
-                else if ((current.direction == PCAL64::Output) && (config & pinBit))
-                {
-                    config &= ~pinBit;
-                }
-
-                // only send changes
-                if (config != value)
-                {
-                    setRegister(CONFIGURATION_PORT_0, config);
-                    state = STATE_COMMAND_DONE;
-                }
-                else
-                {
-                    // no changes made, schedule callback
-                    if (commandCallback)
-                    {
-                        minar::Scheduler::postCallback(commandCallback);
-                    }
-                    state = STATE_IDLE;
-                }
-            }
-            break;
-
-        case STATE_WRITE_GET:
-            {
-                uint16_t pinBit = 1 << currentPin;
-                uint16_t output = value;
-
-                // compare change
-                if ((current.value == 1) && !(output & pinBit))
-                {
-                    output |= pinBit;
-                }
-                else if ((current.value == 0) && (output & pinBit))
-                {
-                    output &= ~pinBit;
-                }
-
-                // only send changes
-                if (output != value)
-                {
-                    setRegister(OUTPUT_PORT_0, output);
-                    state = STATE_COMMAND_DONE;
-                }
-                else
-                {
-                    // no changes made, schedule callback
-                    if (commandCallback)
-                    {
-                        minar::Scheduler::postCallback(commandCallback);
-                    }
-                    state = STATE_IDLE;
-                }
-            }
-            break;
-
-        case STATE_COMMAND_DONE:
-            {
-                if (commandCallback)
-                {
-                    minar::Scheduler::postCallback(commandCallback);
-                }
-                state = STATE_IDLE;
-            }
-            break;
-
+        /*********************************************************************/
+        /* bulkRead                                                          */
+        /*********************************************************************/
         case STATE_READ_GET:
             {
-                if (readCallback)
+                if (externalReadHandler)
                 {
-                    int pin = (value & (1 << currentPin)) ? 1 : 0;
-                    minar::Scheduler::postCallback(readCallback.bind(pin));
+                    uint32_t values = readBuffer[1];
+                    values = (values << 8) | readBuffer[0];
+
+                    minar::Scheduler::postCallback(externalReadHandler.bind(values))
+                        .tolerance(1);
                 }
+
                 state = STATE_IDLE;
             }
             break;
 
-        case STATE_TOGGLE_GET:
+        /*********************************************************************/
+        /* bulkWrite                                                         */
+        /*********************************************************************/
+        case STATE_WRITE_GET_DIRECTIONS:
             {
-                uint16_t pinBit = 1 << currentPin;
+                uint16_t directions = readBuffer[1];
+                directions = (directions << 8) | readBuffer[0];
 
-                if (value & pinBit)
+                // enable bits
+                directions |= (pins & param1);
+
+                // disable bits
+                directions &= ~(pins & ~param1);
+
+                uint8_t writeBuffer[2];
+                writeBuffer[0] = directions;
+                writeBuffer[1] = directions >> 8;
+
+                FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+                i2c.write(address, CONFIGURATION_PORT_0, writeBuffer, 2, fp);
+
+                state = STATE_WRITE_SET_DIRECTIONS;
+            }
+            break;
+
+        case STATE_WRITE_SET_DIRECTIONS:
+            {
+                FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+                i2c.read(address, OUTPUT_PORT_0, readBuffer, 2, fp);
+
+                state = STATE_WRITE_GET_VALUES;
+            }
+            break;
+
+        case STATE_WRITE_GET_VALUES:
+            {
+                uint16_t values = readBuffer[1];
+                values = (values << 8) | readBuffer[0];
+
+                // enable bits
+                values |= (pins & param2);
+
+                // disable bits
+                values &= ~(pins & ~param2);
+
+                uint8_t writeBuffer[2];
+                writeBuffer[0] = values;
+                writeBuffer[1] = values >> 8;
+
+                FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+                i2c.write(address, OUTPUT_PORT_0, writeBuffer, 2, fp);
+
+                state = STATE_SIGNAL_DONE;
+            }
+            break;
+
+        /*********************************************************************/
+        /* bulkToggle                                                        */
+        /*********************************************************************/
+        case STATE_TOGGLE_GET_VALUES:
+            {
+                uint16_t values = readBuffer[1];
+                values = (values << 8) | readBuffer[0];
+
+                uint16_t original = values;
+
+                // enable bits
+                values |= (pins & ~original);
+
+                // disable bits
+                values &= ~(pins & original);
+
+                uint8_t writeBuffer[2];
+                writeBuffer[0] = values;
+                writeBuffer[1] = values >> 8;
+
+                FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+                i2c.write(address, OUTPUT_PORT_0, writeBuffer, 2, fp);
+
+                state = STATE_SIGNAL_DONE;
+            }
+            break;
+
+        /*********************************************************************/
+        /* bulkInterrupt                                                     */
+        /*********************************************************************/
+        case STATE_INTERRUPT_GET_DIRECTIONS:
+            {
+                uint16_t directions = readBuffer[1];
+                directions = (directions << 8) | readBuffer[0];
+
+                /* set interrupt pins to be input */
+
+                // enable bits
+                directions |= (pins & param1);
+
+                // disable bits
+                directions &= ~(pins & ~param1);
+
+                uint8_t writeBuffer[2];
+                writeBuffer[0] = directions;
+                writeBuffer[1] = directions >> 8;
+
+                FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+                i2c.write(address, CONFIGURATION_PORT_0, writeBuffer, 2, fp);
+
+                state = STATE_INTERRUPT_SET_DIRECTIONS;
+
+            }
+            break;
+
+        case STATE_INTERRUPT_SET_DIRECTIONS:
+            {
+                FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+                i2c.read(address, INTERRUPT_MASK_0, readBuffer, 2, fp);
+
+                state = STATE_INTERRUPT_GET_MASK;
+            }
+            break;
+
+        case STATE_INTERRUPT_GET_MASK:
+            {
+                uint16_t values = readBuffer[1];
+                values = (values << 8) | readBuffer[0];
+
+                // enable bits
+                values |= (pins & param1);
+
+                // disable bits
+                values &= ~(pins & ~param1);
+
+                uint8_t writeBuffer[2];
+                writeBuffer[0] = values;
+                writeBuffer[1] = values >> 8;
+
+                FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+                i2c.write(address, INTERRUPT_MASK_0, writeBuffer, 2, fp);
+
+                state = STATE_SIGNAL_DONE;
+            }
+            break;
+
+        /*********************************************************************/
+        /* IRQ handler                                                       */
+        /*********************************************************************/
+        case STATE_INTERRUPT_GET_VALUES:
+            {
+                cache = readBuffer[1];
+                cache = (cache << 8) | readBuffer[0];
+
+                FunctionPointer0<void> fp(this, &PCAL64::eventHandler);
+                i2c.read(address, INTERRUPT_STATUS_0, readBuffer, 2, fp);
+
+                state = STATE_INTERRUPT_GET_STATUS;
+            }
+            break;
+
+        case STATE_INTERRUPT_GET_STATUS:
+            {
+                uint16_t status = readBuffer[1];
+                status = (status << 8) | readBuffer[0];
+
+                if (externalIRQHandler)
                 {
-                    value &= ~pinBit;
+                    minar::Scheduler::postCallback(externalIRQHandler.bind(address, status, cache))
+                        .tolerance(1);
                 }
-                else
+
+                state = STATE_IDLE;
+            }
+            break;
+
+        /*********************************************************************/
+        /* signal done                                                       */
+        /*********************************************************************/
+        case STATE_SIGNAL_DONE:
+            {
+                if (externalDoneHandler)
                 {
-                    value |= pinBit;
+                    minar::Scheduler::postCallback(externalDoneHandler)
+                        .tolerance(1);
                 }
 
-                setRegister(OUTPUT_PORT_0, value);
-                state = STATE_COMMAND_DONE;
-            }
-            break;
-
-        case STATE_BULK_VALUE_GET:
-            {
-                // set setted pins
-                value |= bulkPins & bulkValues;
-
-                // clear cleared pins
-                value &= ~(bulkPins & ~bulkValues);
-
-                setRegister(OUTPUT_PORT_0, value);
-                state = STATE_BULK_VALUE_SET;
-            }
-            break;
-
-        case STATE_BULK_VALUE_SET:
-            {
-                getRegister(CONFIGURATION_PORT_0);
-                state = STATE_BULK_DIRECTION_GET;
-            }
-            break;
-
-        case STATE_BULK_DIRECTION_GET:
-            {
-                // set setted pins
-                value |= bulkPins & bulkDirections;
-
-                // clear cleared pins
-                value &= ~(bulkPins & ~bulkDirections);
-
-                setRegister(CONFIGURATION_PORT_0, value);
-                state = STATE_COMMAND_DONE;
+                state = STATE_IDLE;
             }
             break;
 
         default:
+            state = STATE_IDLE;
             break;
     }
-}
-
-/*
-    Interrupts
-*/
-void PCAL64::interruptISR()
-{
-
-}
-
-void PCAL64::interruptTask()
-{
-    printf("interrupt\r\n");
-}
-
-/*****************************************************************************/
-
-PCAL64::PinActionAdder::PinActionAdder(PCAL64* _owner, int pin, direction_t direction)
-    :   pins(1 << pin),
-        values(0),
-        _callback((void (*)(void)) NULL),
-        ready(false),
-        owner(_owner)
-{
-    directions = direction << pin;
-}
-
-PCAL64::PinActionAdder::PinActionAdder(PCAL64* _owner, int pin, int value)
-    :   pins(1 << pin),
-        directions(0),
-        _callback((void (*)(void)) NULL),
-        ready(false),
-        owner(_owner)
-{
-    values = value << pin;
-}
-
-const PCAL64::PinActionAdder& PCAL64::PinActionAdder::operator=(const PCAL64::PinActionAdder& adder)
-{
-    pins       = adder.pins;
-    directions = adder.directions;
-    values     = adder.values;
-    _callback  = adder._callback;
-    ready      = adder.ready;
-    owner      = adder.owner;
-
-    return *this;
-}
-
-PCAL64::PinActionAdder::PinActionAdder(const PinActionAdder& adder)
-{
-    *this = adder;
-}
-
-PCAL64::PinActionAdder::~PinActionAdder()
-{
-    if (ready)
-    {
-        owner->bulkSet(pins, directions, values, _callback);
-    }
-}
-
-PCAL64::PinActionAdder& PCAL64::PinActionAdder::set(int pin, direction_t direction)
-{
-    pins |= 1 << pin;
-    directions |= direction << pin;
-    ready = true;
-
-    return *this;
-}
-
-PCAL64::PinActionAdder& PCAL64::PinActionAdder::set(int pin, int value)
-{
-    pins |= 1 << pin;
-    values |= value << pin;
-    ready = true;
-
-    return *this;
-}
-
-PCAL64::PinActionAdder& PCAL64::PinActionAdder::callback(FunctionPointer0<void> __callback)
-{
-    _callback = __callback;
-    ready = true;
-
-    return *this;
 }
