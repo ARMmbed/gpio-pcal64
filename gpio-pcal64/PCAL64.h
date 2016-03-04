@@ -31,7 +31,7 @@ public:
     } address_t;
 
     typedef enum {
-        P0_0 = 0,
+        P0_0 = (1 <<  0),
         P0_1 = (1 <<  1),
         P0_2 = (1 <<  2),
         P0_3 = (1 <<  3),
@@ -127,16 +127,20 @@ public:
 private:
 
     void eventHandler(void);
-    void internalIRQHandler(void);
+    void internalHandlerIRQ(void);
+    void internalHandlerTask(void);
 
     I2CRegister i2c;
     uint16_t address;
     InterruptIn irq;
 
-    uint32_t pins;
-    uint32_t param1;
-    uint32_t param2;
-    uint32_t cache;
+    uint16_t pins;
+    uint16_t param1;
+    uint16_t param2;
+    uint16_t cache;
+
+    uint16_t backupStatus;
+    uint16_t backupValues;
 
     uint8_t readBuffer[2];
 
@@ -145,16 +149,19 @@ private:
     FunctionPointer3<void, uint16_t, uint32_t, uint32_t> externalIRQHandler;
 
     typedef enum {
-        STATE_READ_GET,
+        STATE_READ_GET_STATUS,
+        STATE_READ_GET_VALUES,
         STATE_WRITE_GET_DIRECTIONS,
         STATE_WRITE_SET_DIRECTIONS,
         STATE_WRITE_GET_VALUES,
         STATE_TOGGLE_GET_VALUES,
         STATE_INTERRUPT_GET_DIRECTIONS,
         STATE_INTERRUPT_SET_DIRECTIONS,
+        STATE_INTERRUPT_GET_LATCH,
+        STATE_INTERRUPT_SET_LATCH,
         STATE_INTERRUPT_GET_MASK,
-        STATE_INTERRUPT_GET_VALUES,
         STATE_INTERRUPT_GET_STATUS,
+        STATE_INTERRUPT_GET_VALUES,
         STATE_SIGNAL_DONE,
         STATE_IDLE
     } state_t;

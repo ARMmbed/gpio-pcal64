@@ -17,9 +17,6 @@
 #include "mbed-drivers/mbed.h"
 #include "gpio-pcal64/PCAL64.h"
 
-#include "swo/swo.h"
-#define printf swoprintf
-
 /*****************************************************************************/
 /* PCAL64                                                                    */
 /*****************************************************************************/
@@ -45,11 +42,9 @@ void writeDone(void)
 
 }
 
-void readDone(uint32_t values)
+void irqDone()
 {
-    printf("%lu\r\n", values);
-
-    ioexpander1.bulkWrite(PCAL64::P0_6, PCAL64::P0_6, PCAL64::P0_6, writeDone);
+    ioexpander1.bulkWrite(PCAL64::P0_6, PCAL64::P0_6, 0, writeDone);
 }
 
 /*****************************************************************************/
@@ -59,9 +54,16 @@ void readDone(uint32_t values)
 // enable buttons to initiate transfer
 static InterruptIn button1(YOTTA_CFG_HARDWARE_WEARABLE_REFERENCE_DESIGN_BUTTON_FORWARD_GPIO_PIN);
 
+void readDone(uint32_t values)
+{
+    printf("%lu\r\n", values);
+}
+
 void toggleDone()
 {
     printf("toggle done\r\n");
+
+    ioexpander0.bulkRead(readDone);
 }
 
 void button1Task()
@@ -80,13 +82,11 @@ void button1ISR()
 
 void app_start(int, char *[])
 {
-    printf("hello\r\n");
-
     // setup buttons
     button1.fall(button1ISR);
 
     ioexpander0.setInterruptHandler(irqHandler);
     ioexpander1.setInterruptHandler(irqHandler);
 
-    ioexpander0.bulkRead(readDone);
+    ioexpander0.bulkSetInterrupt(PCAL64::P0_0, PCAL64::P0_0, irqDone);
 }
